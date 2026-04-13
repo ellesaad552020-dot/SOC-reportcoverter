@@ -22,19 +22,45 @@ def get_chart_shapes(slide):
     return [shape for shape in slide.shapes if getattr(shape, "has_chart", False)]
 
 
-def replace_single_series_chart(chart, categories, series_name, values):
+def format_chart_as_percent(chart, decimals=1):
+    fmt = "0." + ("0" * decimals) + "%"
+    try:
+        chart.value_axis.tick_labels.number_format = fmt
+    except Exception:
+        pass
+
+    try:
+        chart.category_axis.tick_labels.number_format = "General"
+    except Exception:
+        pass
+
+    for series in chart.series:
+        try:
+            series.data_labels.show_value = True
+            series.data_labels.number_format = fmt
+        except Exception:
+            pass
+
+
+def replace_single_series_chart(chart, categories, series_name, values, percent_format=False, decimals=1):
     chart_data = CategoryChartData()
     chart_data.categories = categories
     chart_data.add_series(series_name, values)
     chart.replace_data(chart_data)
 
+    if percent_format:
+        format_chart_as_percent(chart, decimals=decimals)
 
-def replace_two_series_chart(chart, categories, series1_name, values1, series2_name, values2):
+
+def replace_two_series_chart(chart, categories, series1_name, values1, series2_name, values2, percent_format=False, decimals=1):
     chart_data = CategoryChartData()
     chart_data.categories = categories
     chart_data.add_series(series1_name, values1)
     chart_data.add_series(series2_name, values2)
     chart.replace_data(chart_data)
+
+    if percent_format:
+        format_chart_as_percent(chart, decimals=decimals)
 
 
 def trailing_zeros_to_none(values):
@@ -141,14 +167,17 @@ def update_assembly_main_slides(prs, main_data):
             charts[0].chart,
             weeks,
             "Production Battery",
-            production_plot
+            production_plot,
+            percent_format=False
         )
 
         replace_single_series_chart(
             charts[1].chart,
             weeks,
             "Productivity %",
-            productivity_plot
+            productivity_plot,
+            percent_format=True,
+            decimals=1
         )
 
 
@@ -203,7 +232,9 @@ def update_scrap_total_slide(slide, weeks, actual_vals, target_vals, actual_name
         actual_name,
         trailing_zeros_to_none(actual_vals),
         target_name,
-        target_vals
+        target_vals,
+        percent_format=True,
+        decimals=2
     )
 
 
@@ -217,17 +248,23 @@ def update_scrap_lines_slide(slide, weeks, k1_actual, k1_target, k2_actual, k2_t
     replace_two_series_chart(
         charts[0].chart, weeks,
         actual_name, trailing_zeros_to_none(k1_actual),
-        target_name, k1_target
+        target_name, k1_target,
+        percent_format=True,
+        decimals=2
     )
     replace_two_series_chart(
         charts[1].chart, weeks,
         actual_name, trailing_zeros_to_none(k2_actual),
-        target_name, k2_target
+        target_name, k2_target,
+        percent_format=True,
+        decimals=2
     )
     replace_two_series_chart(
         charts[2].chart, weeks,
         actual_name, trailing_zeros_to_none(k3_actual),
-        target_name, k3_target
+        target_name, k3_target,
+        percent_format=True,
+        decimals=2
     )
 
 
