@@ -37,6 +37,23 @@ def replace_two_series_chart(chart, categories, series1_name, values1, series2_n
     chart.replace_data(chart_data)
 
 
+def trailing_zeros_to_none(values):
+    result = list(values)
+
+    last_non_zero_index = -1
+    for i, v in enumerate(result):
+        if v not in (None, 0, 0.0):
+            last_non_zero_index = i
+
+    if last_non_zero_index == -1:
+        return [None for _ in result]
+
+    for i in range(last_non_zero_index + 1, len(result)):
+        result[i] = None
+
+    return result
+
+
 # ---------------- STRIP ----------------
 def read_strip_data(excel_bytes):
     wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
@@ -71,7 +88,6 @@ def read_strip_data(excel_bytes):
 
 
 def update_table_first_col_values(table, values):
-    # يفترض أن الصف 0 هيدر، والقيم تبدأ من الصف 1
     max_rows_to_fill = min(len(values), len(table.rows) - 1)
     for i in range(max_rows_to_fill):
         row_idx = i + 1
@@ -80,8 +96,6 @@ def update_table_first_col_values(table, values):
 
 
 def update_strip_slides(prs, weeks, production, achieved, slag_pct, slag_kg, target_slag_pct):
-    # Slide 3 = index 2
-    # Slide 4 = index 3
     slide3 = prs.slides[2]
     slide4 = prs.slides[3]
 
@@ -100,14 +114,18 @@ def update_strip_slides(prs, weeks, production, achieved, slag_pct, slag_kg, tar
     slide4_charts.sort(key=lambda s: s.left)
     slide4_tables.sort(key=lambda s: s.left)
 
-    replace_single_series_chart(slide3_charts[0].chart, weeks, "Production Roll", production)
-    replace_single_series_chart(slide3_charts[1].chart, weeks, "Achieved %", achieved)
+    production_plot = trailing_zeros_to_none(production)
+    achieved_plot = trailing_zeros_to_none(achieved)
+    slag_pct_plot = trailing_zeros_to_none(slag_pct)
+
+    replace_single_series_chart(slide3_charts[0].chart, weeks, "Production Roll", production_plot)
+    replace_single_series_chart(slide3_charts[1].chart, weeks, "Achieved %", achieved_plot)
 
     replace_two_series_chart(
         slide4_charts[0].chart,
         weeks,
         "Slag %",
-        slag_pct,
+        slag_pct_plot,
         "Target Slag %",
         target_slag_pct
     )
@@ -179,10 +197,6 @@ def update_pasting_slides(
     rejected_plates_pct,
     rejected_plates_target,
 ):
-    # Slide 5 = index 4
-    # Slide 6 = index 5
-    # Slide 7 = index 6
-    # Slide 8 = index 7
     slide5 = prs.slides[4]
     slide6 = prs.slides[5]
     slide7 = prs.slides[6]
@@ -207,36 +221,38 @@ def update_pasting_slides(
     slide7_charts.sort(key=lambda s: s.left)
     slide8_charts.sort(key=lambda s: s.left)
 
-    # Slide 5
-    replace_single_series_chart(slide5_charts[0].chart, weeks, "Produced Blocks", produced_blocks)
-    replace_single_series_chart(slide5_charts[1].chart, weeks, "Achieved %", achieved_pct)
+    produced_blocks_plot = trailing_zeros_to_none(produced_blocks)
+    achieved_pct_plot = trailing_zeros_to_none(achieved_pct)
+    strip_scrap_pct_plot = trailing_zeros_to_none(strip_scrap_pct)
+    plate_scrap_pct_plot = trailing_zeros_to_none(plate_scrap_pct)
+    rejected_plates_pct_plot = trailing_zeros_to_none(rejected_plates_pct)
 
-    # Slide 6
+    replace_single_series_chart(slide5_charts[0].chart, weeks, "Produced Blocks", produced_blocks_plot)
+    replace_single_series_chart(slide5_charts[1].chart, weeks, "Achieved %", achieved_pct_plot)
+
     replace_two_series_chart(
         slide6_charts[0].chart,
         weeks,
         "Strip Scrap %",
-        strip_scrap_pct,
+        strip_scrap_pct_plot,
         "Target Strip Scrap %",
         strip_scrap_target,
     )
 
-    # Slide 7
     replace_two_series_chart(
         slide7_charts[0].chart,
         weeks,
         "Plate Scrap %",
-        plate_scrap_pct,
+        plate_scrap_pct_plot,
         "Target Plate Scrap %",
         plate_scrap_target,
     )
 
-    # Slide 8
     replace_two_series_chart(
         slide8_charts[0].chart,
         weeks,
         "Rejected Plates %",
-        rejected_plates_pct,
+        rejected_plates_pct_plot,
         "Target Rejected Plates %",
         rejected_plates_target,
     )
@@ -250,11 +266,9 @@ if st.button("Generate PowerPoint"):
         try:
             prs = Presentation(io.BytesIO(ppt_file.getvalue()))
 
-            # Strip
             strip_values = read_strip_data(excel_file.getvalue())
             update_strip_slides(prs, *strip_values)
 
-            # Pasting
             pasting_values = read_pasting_data(excel_file.getvalue())
             update_pasting_slides(prs, *pasting_values)
 
@@ -262,7 +276,7 @@ if st.button("Generate PowerPoint"):
             prs.save(output)
             output.seek(0)
 
-            st.success("تم تحديث Slides 3-8 الخاصة بـ Strip و Pasting بدون تعديل العناوين أو التنسيق أو KPI boxes.")
+            st.success("تم تحديث Slides 3-8، والخط يقف عند آخر أسبوع فيه داتا فعلية.")
 
             st.download_button(
                 label="Download PowerPoint",
