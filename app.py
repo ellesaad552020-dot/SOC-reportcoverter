@@ -2,6 +2,7 @@ import io
 import streamlit as st
 from openpyxl import load_workbook
 from pptx import Presentation
+from pptx.chart.data import CategoryChartData
 
 st.set_page_config(page_title="Weekly Report Generator", layout="centered")
 
@@ -11,56 +12,59 @@ excel_file = st.file_uploader("ارفعي ملف Excel", type=["xlsx", "xls"])
 ppt_file = st.file_uploader("ارفعي الباوربوينت الريفرنس", type=["pptx"])
 
 
-def read_control_values(excel_bytes):
+def read_strip_data(excel_bytes):
     wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
 
-    if "Control" not in wb.sheetnames:
-        raise ValueError("لا توجد شيت باسم Control في ملف Excel.")
+    if "Strip" not in wb.sheetnames:
+        raise ValueError("لا توجد شيت باسم Strip في ملف Excel.")
 
-    ws = wb["Control"]
+    ws = wb["Strip"]
 
-    report_title = ws["B1"].value
-    slide3_title = ws["B2"].value
-    slide3_body = ws["B3"].value
+    weeks = []
+    production = []
+    achieved = []
 
-    return {
-        "report_title": str(report_title).strip() if report_title else "",
-        "slide3_title": str(slide3_title).strip() if slide3_title else "",
-        "slide3_body": str(slide3_body).strip() if slide3_body else "",
-    }
+    for row in range(2, 7):  # Week 1 to Week 5
+        week = ws.cell(row=row, column=1).value
+        prod = ws.cell(row=row, column=2).value
+        ach = ws.cell(row=row, column=3).value
 
+        weeks.append(str(week) if week else f"Week {row-1}")
+        production.append(float(prod) if prod is not None else 0)
+        achieved.append(float(ach) if ach is not None else 0)
 
-def get_text_shapes(slide):
-    text_shapes = []
-    for shape in slide.shapes:
-        if getattr(shape, "has_text_frame", False):
-            text_shapes.append(shape)
-    return text_shapes
+    return weeks, production, achieved
 
 
-def update_presentation(ppt_bytes, values):
+def replace_chart_data(chart, categories, series_name, values):
+    chart_data = CategoryChartData()
+    chart_data.categories = categories
+    chart_data.add_series(series_name, values)
+    chart.replace_data(chart_data)
+
+
+def update_strip_slide_only(ppt_bytes, weeks, production, achieved):
     prs = Presentation(io.BytesIO(ppt_bytes))
 
-    # -------- Slide 1 --------
-    if len(prs.slides) >= 1:
-        slide1 = prs.slides[0]
-        text_shapes = get_text_shapes(slide1)
+    # Slide 4 = index 3
+    if len(prs.slides) < 4:
+        raise ValueError("ملف الباوربوينت لا يحتوي على سلايد 4.")
 
-        if text_shapes and values["report_title"]:
-            # يغيّر أول textbox نصي في أول سلايد
-            text_shapes[0].text = values["report_title"]
+    slide = prs.slides[3]
 
-    # -------- Slide 3 --------
-    # ملاحظة: slide 3 يعني index 2
-    if len(prs.slides) >= 3:
-        slide3 = prs.slides[2]
-        text_shapes = get_text_shapes(slide3)
+    charts = []
+    for shape in slide.shapes:
+        if shape.has_chart:
+            charts.append(shape.chart)
 
-        if len(text_shapes) >= 1 and values["slide3_title"]:
-            text_shapes[0].text = values["slide3_title"]
+    if len(charts) < 2:
+        raise ValueError("لم أجد شارتين في سلايد Strip.")
 
-        if len(text_shapes) >= 2 and values["slide3_body"]:
-            text_shapes[1].text = values["slide3_body"]
+    # أول شارت = Production Roll
+    replace_chart_data(charts[0], weeks, "Production Roll", production)
+
+    # ثاني شارت = Achieved %
+    replace_chart_data(charts[1], weeks, "Achieved %", achieved)
 
     output = io.BytesIO()
     prs.save(output)
@@ -73,14 +77,16 @@ if st.button("Generate PowerPoint"):
         st.error("ارفعي ملف Excel وملف PowerPoint الأول.")
     else:
         try:
-            values = read_control_values(excel_file.getvalue())
+            weeks, production, achieved = read_strip_data(excel_file.getvalue())
 
-            output_ppt = update_presentation(
+            output_ppt = update_strip_slide_only(
                 ppt_file.getvalue(),
-                values
+                weeks,
+                production,
+                achieved
             )
 
-            st.success("تم تعديل أول سلايد وسلايد 3 بنجاح")
+            st.success("تم تحديث شارتات سلايد Strip فقط بدون تعديل العناوين أو التنسيق.")
 
             st.download_button(
                 label="Download PowerPoint",
