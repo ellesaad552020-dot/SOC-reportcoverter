@@ -3,7 +3,6 @@ import streamlit as st
 from openpyxl import load_workbook
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData
-from pptx.enum.chart import XL_CHART_TYPE
 
 st.set_page_config(page_title="Weekly Report Generator", layout="centered")
 st.title("Weekly Report Generator")
@@ -58,22 +57,12 @@ def replace_single_series_chart(chart, categories, series_name, values):
     chart.replace_data(chart_data)
 
 
-def replace_two_series_line_chart(chart, categories, series1_name, values1, series2_name, values2):
+def replace_two_series_chart(chart, categories, series1_name, values1, series2_name, values2):
     chart_data = CategoryChartData()
     chart_data.categories = categories
     chart_data.add_series(series1_name, values1)
     chart_data.add_series(series2_name, values2)
     chart.replace_data(chart_data)
-
-    # خلي نوع الشارت Line
-    chart.chart_type = XL_CHART_TYPE.LINE
-
-    # خلي كل السلاسل Line
-    for series in chart.series:
-        try:
-            series.format.line.width = 19050  # سمك خفيف مناسب
-        except Exception:
-            pass
 
 
 def get_chart_shapes(slide):
@@ -109,8 +98,6 @@ def update_strip_slides(ppt_bytes, weeks, production, achieved, slag_pct, slag_k
     if len(prs.slides) < 4:
         raise ValueError("ملف الباوربوينت لا يحتوي على عدد السلايدات المتوقع.")
 
-    # Slide 3 = index 2
-    # Slide 4 = index 3
     slide3 = prs.slides[2]
     slide4 = prs.slides[3]
 
@@ -133,8 +120,8 @@ def update_strip_slides(ppt_bytes, weeks, production, achieved, slag_pct, slag_k
     replace_single_series_chart(slide3_charts[0].chart, weeks, "Production Roll", production)
     replace_single_series_chart(slide3_charts[1].chart, weeks, "Achieved %", achieved)
 
-    # Slide 4: Slag % + Target Slag % as two line series
-    replace_two_series_line_chart(
+    # Slide 4
+    replace_two_series_chart(
         slide4_charts[0].chart,
         weeks,
         "Slag %",
@@ -143,7 +130,7 @@ def update_strip_slides(ppt_bytes, weeks, production, achieved, slag_pct, slag_k
         target_slag_pct
     )
 
-    # Slide 4 table: slag kg only
+    # Slide 4 table
     update_first_table_numeric_rows(slide4_tables[0].table, slag_kg)
 
     output = io.BytesIO()
