@@ -18,6 +18,26 @@ def get_sheet_case_insensitive(wb, target_name):
     return None
 
 
+def get_chart_shapes(slide):
+    return [shape for shape in slide.shapes if getattr(shape, "has_chart", False)]
+
+
+def replace_single_series_chart(chart, categories, series_name, values):
+    chart_data = CategoryChartData()
+    chart_data.categories = categories
+    chart_data.add_series(series_name, values)
+    chart.replace_data(chart_data)
+
+
+def replace_two_series_chart(chart, categories, series1_name, values1, series2_name, values2):
+    chart_data = CategoryChartData()
+    chart_data.categories = categories
+    chart_data.add_series(series1_name, values1)
+    chart_data.add_series(series2_name, values2)
+    chart.replace_data(chart_data)
+
+
+# ---------------- STRIP ----------------
 def read_strip_data(excel_bytes):
     wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
     ws = get_sheet_case_insensitive(wb, "Strip")
@@ -50,60 +70,24 @@ def read_strip_data(excel_bytes):
     return weeks, production, achieved, slag_pct, slag_kg, target_slag_pct
 
 
-def replace_single_series_chart(chart, categories, series_name, values):
-    chart_data = CategoryChartData()
-    chart_data.categories = categories
-    chart_data.add_series(series_name, values)
-    chart.replace_data(chart_data)
-
-
-def replace_two_series_chart(chart, categories, series1_name, values1, series2_name, values2):
-    chart_data = CategoryChartData()
-    chart_data.categories = categories
-    chart_data.add_series(series1_name, values1)
-    chart_data.add_series(series2_name, values2)
-    chart.replace_data(chart_data)
-
-
-def get_chart_shapes(slide):
-    return [shape for shape in slide.shapes if getattr(shape, "has_chart", False)]
-
-
-def get_table_shapes(slide):
-    return [shape for shape in slide.shapes if getattr(shape, "has_table", False)]
-
-
-def set_cell_text(cell, value):
-    cell.text = str(value)
-
-
-def update_first_table_numeric_rows(table, values):
-    rows_count = len(table.rows)
-    cols_count = len(table.columns)
-
-    if cols_count < 1:
-        raise ValueError("الجدول لا يحتوي على أعمدة.")
-
-    max_rows_to_fill = min(5, rows_count - 1)
-
+def update_table_first_col_values(table, values):
+    # يفترض أن الصف 0 هيدر، والقيم تبدأ من الصف 1
+    max_rows_to_fill = min(len(values), len(table.rows) - 1)
     for i in range(max_rows_to_fill):
         row_idx = i + 1
         val = int(values[i]) if float(values[i]).is_integer() else values[i]
-        set_cell_text(table.cell(row_idx, 0), val)
+        table.cell(row_idx, 0).text = str(val)
 
 
-def update_strip_slides(ppt_bytes, weeks, production, achieved, slag_pct, slag_kg, target_slag_pct):
-    prs = Presentation(io.BytesIO(ppt_bytes))
-
-    if len(prs.slides) < 4:
-        raise ValueError("ملف الباوربوينت لا يحتوي على عدد السلايدات المتوقع.")
-
+def update_strip_slides(prs, weeks, production, achieved, slag_pct, slag_kg, target_slag_pct):
+    # Slide 3 = index 2
+    # Slide 4 = index 3
     slide3 = prs.slides[2]
     slide4 = prs.slides[3]
 
     slide3_charts = get_chart_shapes(slide3)
     slide4_charts = get_chart_shapes(slide4)
-    slide4_tables = get_table_shapes(slide4)
+    slide4_tables = [shape for shape in slide4.shapes if getattr(shape, "has_table", False)]
 
     if len(slide3_charts) < 2:
         raise ValueError("لم أجد شارتين في Slide 3.")
@@ -116,11 +100,9 @@ def update_strip_slides(ppt_bytes, weeks, production, achieved, slag_pct, slag_k
     slide4_charts.sort(key=lambda s: s.left)
     slide4_tables.sort(key=lambda s: s.left)
 
-    # Slide 3
     replace_single_series_chart(slide3_charts[0].chart, weeks, "Production Roll", production)
     replace_single_series_chart(slide3_charts[1].chart, weeks, "Achieved %", achieved)
 
-    # Slide 4
     replace_two_series_chart(
         slide4_charts[0].chart,
         weeks,
@@ -130,37 +112,161 @@ def update_strip_slides(ppt_bytes, weeks, production, achieved, slag_pct, slag_k
         target_slag_pct
     )
 
-    # Slide 4 table
-    update_first_table_numeric_rows(slide4_tables[0].table, slag_kg)
-
-    output = io.BytesIO()
-    prs.save(output)
-    output.seek(0)
-    return output
+    update_table_first_col_values(slide4_tables[0].table, slag_kg)
 
 
+# ---------------- PASTING (Slides 5-8) ----------------
+def read_pasting_data(excel_bytes):
+    wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
+    ws = get_sheet_case_insensitive(wb, "Pasting")
+
+    if ws is None:
+        raise ValueError("لا توجد شيت باسم Pasting في ملف Excel.")
+
+    weeks = []
+    produced_blocks = []
+    achieved_pct = []
+    strip_scrap_pct = []
+    strip_scrap_target = []
+    plate_scrap_pct = []
+    plate_scrap_target = []
+    rejected_plates_pct = []
+    rejected_plates_target = []
+
+    for row in range(2, 7):  # Week 1 to Week 5
+        week = ws.cell(row=row, column=1).value
+        produced = ws.cell(row=row, column=2).value
+        achieved = ws.cell(row=row, column=3).value
+        strip_actual = ws.cell(row=row, column=4).value
+        strip_target = ws.cell(row=row, column=5).value
+        plate_actual = ws.cell(row=row, column=6).value
+        plate_target = ws.cell(row=row, column=7).value
+        rejected_actual = ws.cell(row=row, column=8).value
+        rejected_target = ws.cell(row=row, column=9).value
+
+        weeks.append(str(week) if week else f"Week {row-1}")
+        produced_blocks.append(float(produced) if produced is not None else 0)
+        achieved_pct.append(float(achieved) if achieved is not None else 0)
+        strip_scrap_pct.append(float(strip_actual) if strip_actual is not None else 0)
+        strip_scrap_target.append(float(strip_target) if strip_target is not None else 0.3)
+        plate_scrap_pct.append(float(plate_actual) if plate_actual is not None else 0)
+        plate_scrap_target.append(float(plate_target) if plate_target is not None else 0.3)
+        rejected_plates_pct.append(float(rejected_actual) if rejected_actual is not None else 0)
+        rejected_plates_target.append(float(rejected_target) if rejected_target is not None else 0.03)
+
+    return (
+        weeks,
+        produced_blocks,
+        achieved_pct,
+        strip_scrap_pct,
+        strip_scrap_target,
+        plate_scrap_pct,
+        plate_scrap_target,
+        rejected_plates_pct,
+        rejected_plates_target,
+    )
+
+
+def update_pasting_slides(
+    prs,
+    weeks,
+    produced_blocks,
+    achieved_pct,
+    strip_scrap_pct,
+    strip_scrap_target,
+    plate_scrap_pct,
+    plate_scrap_target,
+    rejected_plates_pct,
+    rejected_plates_target,
+):
+    # Slide 5 = index 4
+    # Slide 6 = index 5
+    # Slide 7 = index 6
+    # Slide 8 = index 7
+    slide5 = prs.slides[4]
+    slide6 = prs.slides[5]
+    slide7 = prs.slides[6]
+    slide8 = prs.slides[7]
+
+    slide5_charts = get_chart_shapes(slide5)
+    slide6_charts = get_chart_shapes(slide6)
+    slide7_charts = get_chart_shapes(slide7)
+    slide8_charts = get_chart_shapes(slide8)
+
+    if len(slide5_charts) < 2:
+        raise ValueError("لم أجد شارتين في Slide 5.")
+    if len(slide6_charts) < 1:
+        raise ValueError("لم أجد شارتًا في Slide 6.")
+    if len(slide7_charts) < 1:
+        raise ValueError("لم أجد شارتًا في Slide 7.")
+    if len(slide8_charts) < 1:
+        raise ValueError("لم أجد شارتًا في Slide 8.")
+
+    slide5_charts.sort(key=lambda s: s.left)
+    slide6_charts.sort(key=lambda s: s.left)
+    slide7_charts.sort(key=lambda s: s.left)
+    slide8_charts.sort(key=lambda s: s.left)
+
+    # Slide 5
+    replace_single_series_chart(slide5_charts[0].chart, weeks, "Produced Blocks", produced_blocks)
+    replace_single_series_chart(slide5_charts[1].chart, weeks, "Achieved %", achieved_pct)
+
+    # Slide 6
+    replace_two_series_chart(
+        slide6_charts[0].chart,
+        weeks,
+        "Strip Scrap %",
+        strip_scrap_pct,
+        "Target Strip Scrap %",
+        strip_scrap_target,
+    )
+
+    # Slide 7
+    replace_two_series_chart(
+        slide7_charts[0].chart,
+        weeks,
+        "Plate Scrap %",
+        plate_scrap_pct,
+        "Target Plate Scrap %",
+        plate_scrap_target,
+    )
+
+    # Slide 8
+    replace_two_series_chart(
+        slide8_charts[0].chart,
+        weeks,
+        "Rejected Plates %",
+        rejected_plates_pct,
+        "Target Rejected Plates %",
+        rejected_plates_target,
+    )
+
+
+# ---------------- MAIN ----------------
 if st.button("Generate PowerPoint"):
     if excel_file is None or ppt_file is None:
         st.error("ارفعي ملف Excel وملف PowerPoint الأول.")
     else:
         try:
-            weeks, production, achieved, slag_pct, slag_kg, target_slag_pct = read_strip_data(excel_file.getvalue())
+            prs = Presentation(io.BytesIO(ppt_file.getvalue()))
 
-            output_ppt = update_strip_slides(
-                ppt_file.getvalue(),
-                weeks,
-                production,
-                achieved,
-                slag_pct,
-                slag_kg,
-                target_slag_pct,
-            )
+            # Strip
+            strip_values = read_strip_data(excel_file.getvalue())
+            update_strip_slides(prs, *strip_values)
 
-            st.success("تم تحديث شارتات Strip وجدول Slide 4 فقط بدون تعديل العناوين أو التنسيق أو KPIs.")
+            # Pasting
+            pasting_values = read_pasting_data(excel_file.getvalue())
+            update_pasting_slides(prs, *pasting_values)
+
+            output = io.BytesIO()
+            prs.save(output)
+            output.seek(0)
+
+            st.success("تم تحديث Slides 3-8 الخاصة بـ Strip و Pasting بدون تعديل العناوين أو التنسيق أو KPI boxes.")
 
             st.download_button(
                 label="Download PowerPoint",
-                data=output_ppt,
+                data=output,
                 file_name="generated_report.pptx",
                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             )
