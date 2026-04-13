@@ -10,80 +10,57 @@ st.title("Weekly Report Generator")
 excel_file = st.file_uploader("ارفعي ملف Excel", type=["xlsx", "xls"])
 ppt_file = st.file_uploader("ارفعي الباوربوينت الريفرنس", type=["pptx"])
 
-manual_title = st.text_input("عنوان احتياطي لو Excel مفيهوش عنوان", "")
 
-
-def extract_title_from_excel(excel_bytes):
+def read_control_values(excel_bytes):
     wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
 
-    sheets_to_check = []
-    if "Control" in wb.sheetnames:
-        sheets_to_check.append(wb["Control"])
+    if "Control" not in wb.sheetnames:
+        raise ValueError("لا توجد شيت باسم Control في ملف Excel.")
 
-    sheets_to_check.append(wb[wb.sheetnames[0]])
+    ws = wb["Control"]
 
-    labels = {
-        "report title",
-        "title",
-        "عنوان التقرير",
-        "report_title",
+    report_title = ws["B1"].value
+    slide3_title = ws["B2"].value
+    slide3_body = ws["B3"].value
+
+    return {
+        "report_title": str(report_title).strip() if report_title else "",
+        "slide3_title": str(slide3_title).strip() if slide3_title else "",
+        "slide3_body": str(slide3_body).strip() if slide3_body else "",
     }
 
-    for ws in sheets_to_check:
-        for row in range(1, 21):
-            for col in range(1, 6):
-                cell_value = ws.cell(row=row, column=col).value
-                if isinstance(cell_value, str) and cell_value.strip().lower() in labels:
-                    right_value = ws.cell(row=row, column=col + 1).value
-                    if right_value:
-                        return str(right_value).strip()
 
-    for ws in sheets_to_check:
-        b1_value = ws["B1"].value
-        if b1_value:
-            return str(b1_value).strip()
-
-    return None
+def get_text_shapes(slide):
+    text_shapes = []
+    for shape in slide.shapes:
+        if getattr(shape, "has_text_frame", False):
+            text_shapes.append(shape)
+    return text_shapes
 
 
-def update_first_slide_title(ppt_bytes, new_title):
+def update_presentation(ppt_bytes, values):
     prs = Presentation(io.BytesIO(ppt_bytes))
 
-    if len(prs.slides) == 0:
-        raise ValueError("ملف الباوربوينت لا يحتوي على أي سلايدات.")
+    # -------- Slide 1 --------
+    if len(prs.slides) >= 1:
+        slide1 = prs.slides[0]
+        text_shapes = get_text_shapes(slide1)
 
-    first_slide = prs.slides[0]
-    target_shape = None
+        if text_shapes and values["report_title"]:
+            # يغيّر أول textbox نصي في أول سلايد
+            text_shapes[0].text = values["report_title"]
 
-    keywords = [
-        "weekly",
-        "production",
-        "month",
-        "الانتاج",
-        "الإنتاج",
-        "الاسبوع",
-        "الأسبوع",
-    ]
+    # -------- Slide 3 --------
+    # ملاحظة: slide 3 يعني index 2
+    if len(prs.slides) >= 3:
+        slide3 = prs.slides[2]
+        text_shapes = get_text_shapes(slide3)
 
-    for shape in first_slide.shapes:
-        if getattr(shape, "has_text_frame", False):
-            text = shape.text.strip()
-            if text and any(keyword in text.lower() for keyword in keywords):
-                target_shape = shape
-                break
+        if len(text_shapes) >= 1 and values["slide3_title"]:
+            text_shapes[0].text = values["slide3_title"]
 
-    if target_shape is None:
-        for shape in first_slide.shapes:
-            if getattr(shape, "has_text_frame", False):
-                text = shape.text.strip()
-                if text:
-                    target_shape = shape
-                    break
-
-    if target_shape is None:
-        raise ValueError("لم أجد عنوانًا نصيًا في أول سلايد.")
-
-    target_shape.text = new_title
+        if len(text_shapes) >= 2 and values["slide3_body"]:
+            text_shapes[1].text = values["slide3_body"]
 
     output = io.BytesIO()
     prs.save(output)
@@ -96,25 +73,21 @@ if st.button("Generate PowerPoint"):
         st.error("ارفعي ملف Excel وملف PowerPoint الأول.")
     else:
         try:
-            title_from_excel = extract_title_from_excel(excel_file.getvalue())
-            final_title = title_from_excel or manual_title.strip()
+            values = read_control_values(excel_file.getvalue())
 
-            if not final_title:
-                st.error("لم أجد عنوانًا في Excel. اكتبيه في Control!B1 أو اكتبيه يدويًا.")
-            else:
-                st.success(f"العنوان المقروء: {final_title}")
+            output_ppt = update_presentation(
+                ppt_file.getvalue(),
+                values
+            )
 
-                output_ppt = update_first_slide_title(
-                    ppt_file.getvalue(),
-                    final_title
-                )
+            st.success("تم تعديل أول سلايد وسلايد 3 بنجاح")
 
-                st.download_button(
-                    label="Download PowerPoint",
-                    data=output_ppt,
-                    file_name="generated_report.pptx",
-                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                )
+            st.download_button(
+                label="Download PowerPoint",
+                data=output_ppt,
+                file_name="generated_report.pptx",
+                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            )
 
         except Exception as e:
             st.error(f"حصل خطأ: {e}")
