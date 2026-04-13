@@ -11,6 +11,9 @@ excel_file = st.file_uploader("ارفعي ملف Excel", type=["xlsx"])
 ppt_file = st.file_uploader("ارفعي الباوربوينت الريفرنس", type=["pptx"])
 
 
+# =========================
+# General Helpers
+# =========================
 def get_sheet_case_insensitive(wb, target_name):
     for sheet_name in wb.sheetnames:
         if sheet_name.strip().lower() == target_name.strip().lower():
@@ -54,7 +57,47 @@ def trailing_zeros_to_none(values):
     return result
 
 
-# ---------------- STRIP ----------------
+def normalize_percent(v):
+    if v is None:
+        return 0.0
+    v = float(v)
+    return v / 100.0 if v > 1 else v
+
+
+def filter_rows_by_type(ws, row_type_name):
+    rows = []
+    for row in range(2, ws.max_row + 1):
+        row_type = ws.cell(row=row, column=1).value
+        if str(row_type).strip().lower() == row_type_name.strip().lower():
+            rows.append(row)
+    return rows
+
+
+def read_values_from_rows(ws, rows, columns, percent_keys=None):
+    percent_keys = percent_keys or set()
+    result = {key: [] for key in columns}
+
+    for row in rows:
+        for key, col in columns.items():
+            value = ws.cell(row=row, column=col).value
+            if key == "week":
+                result[key].append(str(value) if value else "")
+            elif key in percent_keys:
+                result[key].append(normalize_percent(value))
+            else:
+                result[key].append(float(value) if value is not None else 0)
+
+    return result
+
+
+def sort_three_charts_layout(charts):
+    return sorted(charts, key=lambda s: (s.top, s.left))
+
+
+# =========================
+# STRIP
+# Slides 3-4
+# =========================
 def read_strip_data(excel_bytes):
     wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
     ws = get_sheet_case_insensitive(wb, "Strip")
@@ -79,10 +122,10 @@ def read_strip_data(excel_bytes):
 
         weeks.append(str(week) if week else f"Week {row-1}")
         production.append(float(prod) if prod is not None else 0)
-        achieved.append(float(ach) if ach is not None else 0)
-        slag_pct.append(float(slg_pct) if slg_pct is not None else 0)
+        achieved.append(normalize_percent(ach))
+        slag_pct.append(normalize_percent(slg_pct))
         slag_kg.append(float(slg_kg_val) if slg_kg_val is not None else 0)
-        target_slag_pct.append(float(target_val) if target_val is not None else 2.8)
+        target_slag_pct.append(normalize_percent(target_val) if target_val is not None else 0.028)
 
     return weeks, production, achieved, slag_pct, slag_kg, target_slag_pct
 
@@ -133,7 +176,10 @@ def update_strip_slides(prs, weeks, production, achieved, slag_pct, slag_kg, tar
     update_table_first_col_values(slide4_tables[0].table, slag_kg)
 
 
-# ---------------- PASTING (Slides 5-8) ----------------
+# =========================
+# PASTING
+# Slides 5-8
+# =========================
 def read_pasting_data(excel_bytes):
     wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
     ws = get_sheet_case_insensitive(wb, "Pasting")
@@ -164,13 +210,13 @@ def read_pasting_data(excel_bytes):
 
         weeks.append(str(week) if week else f"Week {row-1}")
         produced_blocks.append(float(produced) if produced is not None else 0)
-        achieved_pct.append(float(achieved) if achieved is not None else 0)
-        strip_scrap_pct.append(float(strip_actual) if strip_actual is not None else 0)
-        strip_scrap_target.append(float(strip_target) if strip_target is not None else 0.3)
-        plate_scrap_pct.append(float(plate_actual) if plate_actual is not None else 0)
-        plate_scrap_target.append(float(plate_target) if plate_target is not None else 0.3)
-        rejected_plates_pct.append(float(rejected_actual) if rejected_actual is not None else 0)
-        rejected_plates_target.append(float(rejected_target) if rejected_target is not None else 0.03)
+        achieved_pct.append(normalize_percent(achieved))
+        strip_scrap_pct.append(normalize_percent(strip_actual))
+        strip_scrap_target.append(normalize_percent(strip_target) if strip_target is not None else 0.003)
+        plate_scrap_pct.append(normalize_percent(plate_actual))
+        plate_scrap_target.append(normalize_percent(plate_target) if plate_target is not None else 0.003)
+        rejected_plates_pct.append(normalize_percent(rejected_actual))
+        rejected_plates_target.append(normalize_percent(rejected_target) if rejected_target is not None else 0.0003)
 
     return (
         weeks,
@@ -258,7 +304,259 @@ def update_pasting_slides(
     )
 
 
-# ---------------- MAIN ----------------
+# =========================
+# ASSEMBLY MAIN
+# Slides 9-12
+# =========================
+def read_assembly_main_data(excel_bytes):
+    wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
+    ws = get_sheet_case_insensitive(wb, "Assembly_Main")
+
+    if ws is None:
+        raise ValueError("لا توجد شيت باسم Assembly_Main في ملف Excel.")
+
+    column_map = {
+        "week": 2,
+        "production": 3,
+        "productivity": 4,
+    }
+
+    percent_keys = {"productivity"}
+
+    return {
+        "total": read_values_from_rows(ws, filter_rows_by_type(ws, "Total"), column_map, percent_keys),
+        "kory1": read_values_from_rows(ws, filter_rows_by_type(ws, "Kory1"), column_map, percent_keys),
+        "kory2": read_values_from_rows(ws, filter_rows_by_type(ws, "Kory2"), column_map, percent_keys),
+        "kory3": read_values_from_rows(ws, filter_rows_by_type(ws, "Kory3"), column_map, percent_keys),
+    }
+
+
+def update_assembly_main_slides(prs, main_data):
+    slide_map = [
+        (prs.slides[8],  main_data["total"]),
+        (prs.slides[9],  main_data["kory1"]),
+        (prs.slides[10], main_data["kory2"]),
+        (prs.slides[11], main_data["kory3"]),
+    ]
+
+    for slide, data in slide_map:
+        charts = get_chart_shapes(slide)
+
+        if len(charts) < 2:
+            raise ValueError("أحد سلايدات Assembly Main لا يحتوي على شارتين.")
+
+        charts.sort(key=lambda s: s.left)
+
+        weeks = data["week"]
+        production_plot = trailing_zeros_to_none(data["production"])
+        productivity_plot = trailing_zeros_to_none(data["productivity"])
+
+        replace_single_series_chart(
+            charts[0].chart,
+            weeks,
+            "Production Battery",
+            production_plot
+        )
+
+        replace_single_series_chart(
+            charts[1].chart,
+            weeks,
+            "Productivity %",
+            productivity_plot
+        )
+
+
+# =========================
+# ASSEMBLY SCRAP
+# Slides 13-22
+# =========================
+def read_assembly_scrap_data(excel_bytes):
+    wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
+    ws = get_sheet_case_insensitive(wb, "Assembly_Scrap")
+
+    if ws is None:
+        raise ValueError("لا توجد شيت باسم Assembly_Scrap في ملف Excel.")
+
+    column_map = {
+        "week": 2,
+        "scraped_actual": 3,
+        "scraped_target": 4,
+        "reworked_actual": 5,
+        "reworked_target": 6,
+        "separator_actual": 7,
+        "separator_target": 8,
+        "box_actual": 9,
+        "box_target": 10,
+        "cover_actual": 11,
+        "cover_target": 12,
+    }
+
+    percent_keys = {
+        "scraped_actual", "scraped_target",
+        "reworked_actual", "reworked_target",
+        "separator_actual", "separator_target",
+        "box_actual", "box_target",
+        "cover_actual", "cover_target",
+    }
+
+    return {
+        "total": read_values_from_rows(ws, filter_rows_by_type(ws, "Total"), column_map, percent_keys),
+        "kory1": read_values_from_rows(ws, filter_rows_by_type(ws, "Kory1"), column_map, percent_keys),
+        "kory2": read_values_from_rows(ws, filter_rows_by_type(ws, "Kory2"), column_map, percent_keys),
+        "kory3": read_values_from_rows(ws, filter_rows_by_type(ws, "Kory3"), column_map, percent_keys),
+    }
+
+
+def update_scrap_total_slide(slide, weeks, actual_vals, target_vals, actual_name, target_name):
+    charts = get_chart_shapes(slide)
+    if len(charts) < 1:
+        raise ValueError("أحد سلايدات Scrap Total لا يحتوي على شارت.")
+
+    replace_two_series_chart(
+        charts[0].chart,
+        weeks,
+        actual_name,
+        trailing_zeros_to_none(actual_vals),
+        target_name,
+        target_vals
+    )
+
+
+def update_scrap_lines_slide(slide, weeks, k1_actual, k1_target, k2_actual, k2_target, k3_actual, k3_target, actual_name, target_name):
+    charts = get_chart_shapes(slide)
+    if len(charts) < 3:
+        raise ValueError("أحد سلايدات Scrap Lines لا يحتوي على 3 شارتات.")
+
+    charts = sort_three_charts_layout(charts)
+
+    replace_two_series_chart(
+        charts[0].chart,
+        weeks,
+        actual_name,
+        trailing_zeros_to_none(k1_actual),
+        target_name,
+        k1_target
+    )
+    replace_two_series_chart(
+        charts[1].chart,
+        weeks,
+        actual_name,
+        trailing_zeros_to_none(k2_actual),
+        target_name,
+        k2_target
+    )
+    replace_two_series_chart(
+        charts[2].chart,
+        weeks,
+        actual_name,
+        trailing_zeros_to_none(k3_actual),
+        target_name,
+        k3_target
+    )
+
+
+def update_assembly_scrap_slides(prs, scrap_data):
+    weeks = scrap_data["total"]["week"]
+
+    # 13 / 14 -> scraped
+    update_scrap_total_slide(
+        prs.slides[12],
+        weeks,
+        scrap_data["total"]["scraped_actual"],
+        scrap_data["total"]["scraped_target"],
+        "Scraped Plate %",
+        "Target Scraped Plate %"
+    )
+    update_scrap_lines_slide(
+        prs.slides[13],
+        weeks,
+        scrap_data["kory1"]["scraped_actual"], scrap_data["kory1"]["scraped_target"],
+        scrap_data["kory2"]["scraped_actual"], scrap_data["kory2"]["scraped_target"],
+        scrap_data["kory3"]["scraped_actual"], scrap_data["kory3"]["scraped_target"],
+        "Scraped Plate %",
+        "Target Scraped Plate %"
+    )
+
+    # 15 / 16 -> reworked
+    update_scrap_total_slide(
+        prs.slides[14],
+        weeks,
+        scrap_data["total"]["reworked_actual"],
+        scrap_data["total"]["reworked_target"],
+        "Reworked Plate %",
+        "Target Reworked Plate %"
+    )
+    update_scrap_lines_slide(
+        prs.slides[15],
+        weeks,
+        scrap_data["kory1"]["reworked_actual"], scrap_data["kory1"]["reworked_target"],
+        scrap_data["kory2"]["reworked_actual"], scrap_data["kory2"]["reworked_target"],
+        scrap_data["kory3"]["reworked_actual"], scrap_data["kory3"]["reworked_target"],
+        "Reworked Plate %",
+        "Target Reworked Plate %"
+    )
+
+    # 17 / 18 -> separator
+    update_scrap_total_slide(
+        prs.slides[16],
+        weeks,
+        scrap_data["total"]["separator_actual"],
+        scrap_data["total"]["separator_target"],
+        "Separator Scrap %",
+        "Target Separator %"
+    )
+    update_scrap_lines_slide(
+        prs.slides[17],
+        weeks,
+        scrap_data["kory1"]["separator_actual"], scrap_data["kory1"]["separator_target"],
+        scrap_data["kory2"]["separator_actual"], scrap_data["kory2"]["separator_target"],
+        scrap_data["kory3"]["separator_actual"], scrap_data["kory3"]["separator_target"],
+        "Separator Scrap %",
+        "Target Separator %"
+    )
+
+    # 19 / 20 -> box
+    update_scrap_total_slide(
+        prs.slides[18],
+        weeks,
+        scrap_data["total"]["box_actual"],
+        scrap_data["total"]["box_target"],
+        "Box Scrap %",
+        "Target Box Scrap %"
+    )
+    update_scrap_lines_slide(
+        prs.slides[19],
+        weeks,
+        scrap_data["kory1"]["box_actual"], scrap_data["kory1"]["box_target"],
+        scrap_data["kory2"]["box_actual"], scrap_data["kory2"]["box_target"],
+        scrap_data["kory3"]["box_actual"], scrap_data["kory3"]["box_target"],
+        "Box Scrap %",
+        "Target Box Scrap %"
+    )
+
+    # 21 / 22 -> cover
+    update_scrap_total_slide(
+        prs.slides[20],
+        weeks,
+        scrap_data["total"]["cover_actual"],
+        scrap_data["total"]["cover_target"],
+        "Cover Scrap %",
+        "Target Cover Scrap %"
+    )
+    update_scrap_lines_slide(
+        prs.slides[21],
+        weeks,
+        scrap_data["kory1"]["cover_actual"], scrap_data["kory1"]["cover_target"],
+        scrap_data["kory2"]["cover_actual"], scrap_data["kory2"]["cover_target"],
+        scrap_data["kory3"]["cover_actual"], scrap_data["kory3"]["cover_target"],
+        "Cover Scrap %",
+        "Target Cover Scrap %"
+    )
+
+
+# =========================
+# MAIN
+# =========================
 if st.button("Generate PowerPoint"):
     if excel_file is None or ppt_file is None:
         st.error("ارفعي ملف Excel وملف PowerPoint الأول.")
@@ -266,17 +564,27 @@ if st.button("Generate PowerPoint"):
         try:
             prs = Presentation(io.BytesIO(ppt_file.getvalue()))
 
+            # Strip
             strip_values = read_strip_data(excel_file.getvalue())
             update_strip_slides(prs, *strip_values)
 
+            # Pasting
             pasting_values = read_pasting_data(excel_file.getvalue())
             update_pasting_slides(prs, *pasting_values)
+
+            # Assembly Main
+            assembly_main_values = read_assembly_main_data(excel_file.getvalue())
+            update_assembly_main_slides(prs, assembly_main_values)
+
+            # Assembly Scrap
+            assembly_scrap_values = read_assembly_scrap_data(excel_file.getvalue())
+            update_assembly_scrap_slides(prs, assembly_scrap_values)
 
             output = io.BytesIO()
             prs.save(output)
             output.seek(0)
 
-            st.success("تم تحديث Slides 3-8، والخط يقف عند آخر أسبوع فيه داتا فعلية.")
+            st.success("تم تحديث Slides 3-22 الخاصة بـ Strip وPasting وAssembly بنجاح.")
 
             st.download_button(
                 label="Download PowerPoint",
