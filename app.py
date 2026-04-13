@@ -1,52 +1,46 @@
+import io
 import streamlit as st
-import os
-from utils import process_excel_data
-from generate_pptx import generate_pptx
+from pptx import Presentation
 
-# Streamlit UI
-st.title("SOC Monthly Report Generator")
-st.write("Upload an Excel file to generate a PowerPoint report based on the provided template.")
+st.set_page_config(page_title="Weekly Report Generator", layout="centered")
 
-# File upload
-uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+st.title("Weekly Report Generator")
 
-# Month/Year input (optional)
-month_year = st.text_input("Enter Month and Year (e.g., April 2025)", "Month X 2025")
+excel_file = st.file_uploader("ارفعي ملف الداتا Excel", type=["xlsx", "xls"])
+ppt_file = st.file_uploader("ارفعي الباوربوينت الريفرنس", type=["pptx"])
 
-# Generate and download button
-if st.button("Generate Report"):
-    if uploaded_file is not None:
-        try:
-            # Process Excel data
-            data = process_excel_data(uploaded_file)
+report_title = st.text_input("عنوان التقرير", "April 2026 – Week 1 & Week 2")
 
-            # Override month_year if provided by user
-            if month_year != "Month X 2025":
-                data["month_year"] = month_year
-                data["month"] = month_year.split(" ")[0]
+def update_title_only(ppt_bytes, report_title):
+    prs = Presentation(io.BytesIO(ppt_bytes))
 
-            # Dynamically generate the output file name using the month/year input
-            sanitized_month_year = month_year.replace(" ", "_")  # e.g., April_2025
-            output_file = f"SOC_Monthly_Report_{sanitized_month_year}.pptx"  # Use the dynamic file name
+    if len(prs.slides) > 0:
+        first_slide = prs.slides[0]
+        for shape in first_slide.shapes:
+            if hasattr(shape, "text_frame") and shape.has_text_frame:
+                text = shape.text.strip()
+                if text:
+                    shape.text = f"Weekly production for {report_title}"
+                    break
 
-            # Generate PPTX
-            generate_pptx(data, output_file)
+    output = io.BytesIO()
+    prs.save(output)
+    output.seek(0)
+    return output
 
-            # Provide download link
-            with open(output_file, "rb") as f:
-                st.download_button(
-                    label="Download PowerPoint Report",
-                    data=f,
-                    file_name=output_file,
-                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                )
-            st.success("Report generated successfully!")
-            
-            # Clean up generated file after download (in the same block)
-            if os.path.exists(output_file):
-                os.remove(output_file)
-
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
+if st.button("Generate PowerPoint"):
+    if excel_file is None or ppt_file is None:
+        st.error("ارفعي ملف الداتا وملف الباوربوينت الريفرنس الأول")
     else:
-        st.error("Please upload an Excel file.")
+        try:
+            output_ppt = update_title_only(ppt_file.getvalue(), report_title)
+
+            st.success("تم إنشاء نسخة أولية من الباوربوينت")
+            st.download_button(
+                label="Download PowerPoint",
+                data=output_ppt,
+                file_name="generated_report.pptx",
+                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            )
+        except Exception as e:
+            st.error(f"حصل خطأ: {e}")
