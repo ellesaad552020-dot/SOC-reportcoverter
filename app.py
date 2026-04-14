@@ -11,6 +11,9 @@ excel_file = st.file_uploader("ارفعي ملف Excel", type=["xlsx"])
 ppt_file = st.file_uploader("ارفعي الباوربوينت الريفرنس", type=["pptx"])
 
 
+# =========================
+# Helpers
+# =========================
 def get_sheet_case_insensitive(wb, target_name):
     for sheet_name in wb.sheetnames:
         if sheet_name.strip().lower() == target_name.strip().lower():
@@ -20,47 +23,6 @@ def get_sheet_case_insensitive(wb, target_name):
 
 def get_chart_shapes(slide):
     return [shape for shape in slide.shapes if getattr(shape, "has_chart", False)]
-
-
-def format_chart_as_percent(chart, decimals=1):
-    fmt = "0." + ("0" * decimals) + "%"
-    try:
-        chart.value_axis.tick_labels.number_format = fmt
-    except Exception:
-        pass
-
-    try:
-        chart.category_axis.tick_labels.number_format = "General"
-    except Exception:
-        pass
-
-    for series in chart.series:
-        try:
-            series.data_labels.show_value = True
-            series.data_labels.number_format = fmt
-        except Exception:
-            pass
-
-
-def replace_single_series_chart(chart, categories, series_name, values, percent_format=False, decimals=1):
-    chart_data = CategoryChartData()
-    chart_data.categories = categories
-    chart_data.add_series(series_name, values)
-    chart.replace_data(chart_data)
-
-    if percent_format:
-        format_chart_as_percent(chart, decimals=decimals)
-
-
-def replace_two_series_chart(chart, categories, series1_name, values1, series2_name, values2, percent_format=False, decimals=1):
-    chart_data = CategoryChartData()
-    chart_data.categories = categories
-    chart_data.add_series(series1_name, values1)
-    chart_data.add_series(series2_name, values2)
-    chart.replace_data(chart_data)
-
-    if percent_format:
-        format_chart_as_percent(chart, decimals=decimals)
 
 
 def trailing_zeros_to_none(values):
@@ -81,10 +43,9 @@ def trailing_zeros_to_none(values):
 
 
 def normalize_percent(v):
-    if v is None:
+    if v is None or v == "":
         return 0.0
-    v = float(v)
-    return v / 100.0 if v > 1 else v
+    return float(v) / 100.0
 
 
 def filter_rows_by_type(ws, row_type_name):
@@ -96,6 +57,65 @@ def filter_rows_by_type(ws, row_type_name):
     return rows
 
 
+def sort_three_charts_layout(charts):
+    # top chart first, then bottom-left, then bottom-right
+    return sorted(charts, key=lambda s: (s.top, s.left))
+
+
+def set_percent_axis_and_labels(chart, decimals=2):
+    fmt = "0." + ("0" * decimals) + "%"
+
+    try:
+        chart.value_axis.tick_labels.number_format = fmt
+    except Exception:
+        pass
+
+    for series in chart.series:
+        try:
+            series.data_labels.show_value = True
+            series.data_labels.number_format = fmt
+        except Exception:
+            pass
+
+
+def set_plain_number_axis_and_labels(chart):
+    try:
+        chart.value_axis.tick_labels.number_format = '#,##0'
+    except Exception:
+        pass
+
+    for series in chart.series:
+        try:
+            series.data_labels.show_value = False
+        except Exception:
+            pass
+
+
+def replace_single_series_chart(chart, categories, series_name, values, percent_chart=False, percent_decimals=2):
+    chart_data = CategoryChartData()
+    chart_data.categories = categories
+    chart_data.add_series(series_name, values)
+    chart.replace_data(chart_data)
+
+    if percent_chart:
+        set_percent_axis_and_labels(chart, decimals=percent_decimals)
+    else:
+        set_plain_number_axis_and_labels(chart)
+
+
+def replace_two_series_chart(chart, categories, series1_name, values1, series2_name, values2, percent_chart=False, percent_decimals=2):
+    chart_data = CategoryChartData()
+    chart_data.categories = categories
+    chart_data.add_series(series1_name, values1)
+    chart_data.add_series(series2_name, values2)
+    chart.replace_data(chart_data)
+
+    if percent_chart:
+        set_percent_axis_and_labels(chart, decimals=percent_decimals)
+    else:
+        set_plain_number_axis_and_labels(chart)
+
+
 def read_values_from_rows(ws, rows, columns, percent_keys=None):
     percent_keys = percent_keys or set()
     result = {key: [] for key in columns}
@@ -103,6 +123,7 @@ def read_values_from_rows(ws, rows, columns, percent_keys=None):
     for row in rows:
         for key, col in columns.items():
             value = ws.cell(row=row, column=col).value
+
             if key == "week":
                 result[key].append(str(value) if value else "")
             elif key in percent_keys:
@@ -113,12 +134,9 @@ def read_values_from_rows(ws, rows, columns, percent_keys=None):
     return result
 
 
-def sort_three_charts_layout(charts):
-    return sorted(charts, key=lambda s: (s.top, s.left))
-
-
 # =========================
 # ASSEMBLY MAIN
+# Slides 9-12
 # =========================
 def read_assembly_main_data(excel_bytes):
     wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
@@ -127,6 +145,7 @@ def read_assembly_main_data(excel_bytes):
     if ws is None:
         raise ValueError("لا توجد شيت باسم Assembly_Main.")
 
+    # A=Row Type, B=Week, C=Production Battery, D=Productivity %
     column_map = {
         "week": 2,
         "production": 3,
@@ -144,6 +163,7 @@ def read_assembly_main_data(excel_bytes):
 
 
 def update_assembly_main_slides(prs, main_data):
+    # 9 total, 10 line1, 11 line2, 12 line3
     slide_map = [
         (prs.slides[8],  main_data["total"]),
         (prs.slides[9],  main_data["kory1"]),
@@ -163,26 +183,29 @@ def update_assembly_main_slides(prs, main_data):
         production_plot = trailing_zeros_to_none(data["production"])
         productivity_plot = trailing_zeros_to_none(data["productivity"])
 
+        # Left chart = production
         replace_single_series_chart(
             charts[0].chart,
             weeks,
             "Production Battery",
             production_plot,
-            percent_format=False
+            percent_chart=False
         )
 
+        # Right chart = productivity %
         replace_single_series_chart(
             charts[1].chart,
             weeks,
             "Productivity %",
             productivity_plot,
-            percent_format=True,
-            decimals=1
+            percent_chart=True,
+            percent_decimals=1
         )
 
 
 # =========================
 # ASSEMBLY SCRAP
+# Slides 13-22
 # =========================
 def read_assembly_scrap_data(excel_bytes):
     wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
@@ -191,6 +214,7 @@ def read_assembly_scrap_data(excel_bytes):
     if ws is None:
         raise ValueError("لا توجد شيت باسم Assembly_Scrap.")
 
+    # A=Row Type, B=Week, ثم النسب
     column_map = {
         "week": 2,
         "scraped_actual": 3,
@@ -221,7 +245,7 @@ def read_assembly_scrap_data(excel_bytes):
     }
 
 
-def update_scrap_total_slide(slide, weeks, actual_vals, target_vals, actual_name, target_name):
+def update_scrap_total_slide(slide, weeks, actual_vals, target_vals, actual_name, target_name, decimals=2):
     charts = get_chart_shapes(slide)
     if len(charts) < 1:
         raise ValueError("أحد سلايدات التوتال scrap لا يحتوي على شارت.")
@@ -233,51 +257,65 @@ def update_scrap_total_slide(slide, weeks, actual_vals, target_vals, actual_name
         trailing_zeros_to_none(actual_vals),
         target_name,
         target_vals,
-        percent_format=True,
-        decimals=2
+        percent_chart=True,
+        percent_decimals=decimals
     )
 
 
-def update_scrap_lines_slide(slide, weeks, k1_actual, k1_target, k2_actual, k2_target, k3_actual, k3_target, actual_name, target_name):
+def update_scrap_lines_slide(
+    slide,
+    weeks,
+    k1_actual, k1_target,
+    k2_actual, k2_target,
+    k3_actual, k3_target,
+    actual_name, target_name,
+    decimals=2
+):
     charts = get_chart_shapes(slide)
     if len(charts) < 3:
         raise ValueError("أحد سلايدات line-by-line scrap لا يحتوي على 3 شارتات.")
 
     charts = sort_three_charts_layout(charts)
 
+    # Top chart = LINE 1
     replace_two_series_chart(
         charts[0].chart, weeks,
         actual_name, trailing_zeros_to_none(k1_actual),
         target_name, k1_target,
-        percent_format=True,
-        decimals=2
+        percent_chart=True,
+        percent_decimals=decimals
     )
+
+    # Bottom-left = LINE 2
     replace_two_series_chart(
         charts[1].chart, weeks,
         actual_name, trailing_zeros_to_none(k2_actual),
         target_name, k2_target,
-        percent_format=True,
-        decimals=2
+        percent_chart=True,
+        percent_decimals=decimals
     )
+
+    # Bottom-right = LINE 3
     replace_two_series_chart(
         charts[2].chart, weeks,
         actual_name, trailing_zeros_to_none(k3_actual),
         target_name, k3_target,
-        percent_format=True,
-        decimals=2
+        percent_chart=True,
+        percent_decimals=decimals
     )
 
 
 def update_assembly_scrap_slides(prs, scrap_data):
     weeks = scrap_data["total"]["week"]
 
-    # 13 / 14 scraped
+    # Slide 13 / 14 -> Scraped Plate (2 decimals)
     update_scrap_total_slide(
         prs.slides[12], weeks,
         scrap_data["total"]["scraped_actual"],
         scrap_data["total"]["scraped_target"],
         "Scraped Plate %",
-        "Target Scraped Plate %"
+        "Target Scraped Plate %",
+        decimals=2
     )
     update_scrap_lines_slide(
         prs.slides[13], weeks,
@@ -285,16 +323,18 @@ def update_assembly_scrap_slides(prs, scrap_data):
         scrap_data["kory2"]["scraped_actual"], scrap_data["kory2"]["scraped_target"],
         scrap_data["kory3"]["scraped_actual"], scrap_data["kory3"]["scraped_target"],
         "Scraped Plate %",
-        "Target Scraped Plate %"
+        "Target Scraped Plate %",
+        decimals=2
     )
 
-    # 15 / 16 reworked
+    # Slide 15 / 16 -> Reworked (1 decimal)
     update_scrap_total_slide(
         prs.slides[14], weeks,
         scrap_data["total"]["reworked_actual"],
         scrap_data["total"]["reworked_target"],
         "Reworked Plate %",
-        "Target Reworked Plate %"
+        "Target Reworked Plate %",
+        decimals=1
     )
     update_scrap_lines_slide(
         prs.slides[15], weeks,
@@ -302,16 +342,18 @@ def update_assembly_scrap_slides(prs, scrap_data):
         scrap_data["kory2"]["reworked_actual"], scrap_data["kory2"]["reworked_target"],
         scrap_data["kory3"]["reworked_actual"], scrap_data["kory3"]["reworked_target"],
         "Reworked Plate %",
-        "Target Reworked Plate %"
+        "Target Reworked Plate %",
+        decimals=1
     )
 
-    # 17 / 18 separator
+    # Slide 17 / 18 -> Separator (1 decimal)
     update_scrap_total_slide(
         prs.slides[16], weeks,
         scrap_data["total"]["separator_actual"],
         scrap_data["total"]["separator_target"],
         "Separator Scrap %",
-        "Target Separator %"
+        "Target Separator %",
+        decimals=1
     )
     update_scrap_lines_slide(
         prs.slides[17], weeks,
@@ -319,16 +361,18 @@ def update_assembly_scrap_slides(prs, scrap_data):
         scrap_data["kory2"]["separator_actual"], scrap_data["kory2"]["separator_target"],
         scrap_data["kory3"]["separator_actual"], scrap_data["kory3"]["separator_target"],
         "Separator Scrap %",
-        "Target Separator %"
+        "Target Separator %",
+        decimals=1
     )
 
-    # 19 / 20 box
+    # Slide 19 / 20 -> Box (1 decimal)
     update_scrap_total_slide(
         prs.slides[18], weeks,
         scrap_data["total"]["box_actual"],
         scrap_data["total"]["box_target"],
         "Box Scrap %",
-        "Target Box Scrap %"
+        "Target Box Scrap %",
+        decimals=1
     )
     update_scrap_lines_slide(
         prs.slides[19], weeks,
@@ -336,16 +380,18 @@ def update_assembly_scrap_slides(prs, scrap_data):
         scrap_data["kory2"]["box_actual"], scrap_data["kory2"]["box_target"],
         scrap_data["kory3"]["box_actual"], scrap_data["kory3"]["box_target"],
         "Box Scrap %",
-        "Target Box Scrap %"
+        "Target Box Scrap %",
+        decimals=1
     )
 
-    # 21 / 22 cover
+    # Slide 21 / 22 -> Cover (1 decimal)
     update_scrap_total_slide(
         prs.slides[20], weeks,
         scrap_data["total"]["cover_actual"],
         scrap_data["total"]["cover_target"],
         "Cover Scrap %",
-        "Target Cover Scrap %"
+        "Target Cover Scrap %",
+        decimals=1
     )
     update_scrap_lines_slide(
         prs.slides[21], weeks,
@@ -353,7 +399,8 @@ def update_assembly_scrap_slides(prs, scrap_data):
         scrap_data["kory2"]["cover_actual"], scrap_data["kory2"]["cover_target"],
         scrap_data["kory3"]["cover_actual"], scrap_data["kory3"]["cover_target"],
         "Cover Scrap %",
-        "Target Cover Scrap %"
+        "Target Cover Scrap %",
+        decimals=1
     )
 
 
