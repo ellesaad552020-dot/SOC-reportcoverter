@@ -1,4 +1,3 @@
-كود التجميع اخر تعديل 
 import io
 import streamlit as st
 from openpyxl import load_workbook
