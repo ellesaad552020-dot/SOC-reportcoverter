@@ -1,43 +1,19 @@
+كود التجميع اخر تعديل 
 import io
 import streamlit as st
 from openpyxl import load_workbook
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData
 
-st.set_page_config(page_title="Weekly Report Generator", layout="centered")
-st.title("Weekly Report Generator")
+st.set_page_config(page_title="Assembly Test", layout="centered")
+st.title("Assembly Test Only")
 
-# =========================
-# Stable Upload State
-# =========================
-if "excel_bytes" not in st.session_state:
-    st.session_state.excel_bytes = None
-if "excel_name" not in st.session_state:
-    st.session_state.excel_name = None
-if "ppt_bytes" not in st.session_state:
-    st.session_state.ppt_bytes = None
-if "ppt_name" not in st.session_state:
-    st.session_state.ppt_name = None
-
-uploaded_excel = st.file_uploader("ارفعي ملف Excel", type=["xlsx"], key="excel_uploader")
-if uploaded_excel is not None:
-    st.session_state.excel_bytes = uploaded_excel.getvalue()
-    st.session_state.excel_name = uploaded_excel.name
-
-uploaded_ppt = st.file_uploader("ارفعي الباوربوينت الريفرنس", type=["pptx"], key="ppt_uploader")
-if uploaded_ppt is not None:
-    st.session_state.ppt_bytes = uploaded_ppt.getvalue()
-    st.session_state.ppt_name = uploaded_ppt.name
-
-if st.session_state.excel_name:
-    st.success(f"تم حفظ ملف Excel: {st.session_state.excel_name}")
-
-if st.session_state.ppt_name:
-    st.success(f"تم حفظ ملف PowerPoint: {st.session_state.ppt_name}")
+excel_file = st.file_uploader("ارفعي ملف Excel", type=["xlsx"])
+ppt_file = st.file_uploader("ارفعي الباوربوينت الريفرنس", type=["pptx"])
 
 
 # =========================
-# General Helpers
+# Helpers
 # =========================
 def get_sheet_case_insensitive(wb, target_name):
     for sheet_name in wb.sheetnames:
@@ -160,276 +136,8 @@ def read_values_from_rows(ws, rows, columns, percent_keys=None):
 
 
 # =========================
-# STRIP
-# Slides 3-4
-# Sheet: Strip
-# A Week
-# B Production Roll
-# C Achieved %
-# D Slag %
-# E Slag kg
-# F Target Slag %
-# =========================
-def read_strip_data(excel_bytes):
-    wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
-    ws = get_sheet_case_insensitive(wb, "Strip")
-
-    if ws is None:
-        raise ValueError("لا توجد شيت باسم Strip في ملف Excel.")
-
-    weeks = []
-    production = []
-    achieved = []
-    slag_pct = []
-    slag_kg = []
-    target_slag_pct = []
-
-    for row in range(2, 7):
-        week = ws.cell(row=row, column=1).value
-        prod = ws.cell(row=row, column=2).value
-        ach = ws.cell(row=row, column=3).value
-        slg_pct = ws.cell(row=row, column=4).value
-        slg_kg_val = ws.cell(row=row, column=5).value
-        target_val = ws.cell(row=row, column=6).value
-
-        weeks.append(str(week) if week else f"Week {row-1}")
-        production.append(float(prod) if prod is not None else 0)
-        achieved.append(normalize_percent(ach))
-        slag_pct.append(normalize_percent(slg_pct))
-        slag_kg.append(float(slg_kg_val) if slg_kg_val is not None else 0)
-        target_slag_pct.append(normalize_percent(target_val) if target_val is not None else 0.028)
-
-    return weeks, production, achieved, slag_pct, slag_kg, target_slag_pct
-
-
-def update_table_first_col_values(table, values):
-    max_rows_to_fill = min(len(values), len(table.rows) - 1)
-    for i in range(max_rows_to_fill):
-        row_idx = i + 1
-        val = int(values[i]) if float(values[i]).is_integer() else values[i]
-        table.cell(row_idx, 0).text = str(val)
-
-
-def update_strip_slides(prs, weeks, production, achieved, slag_pct, slag_kg, target_slag_pct):
-    slide3 = prs.slides[2]
-    slide4 = prs.slides[3]
-
-    slide3_charts = get_chart_shapes(slide3)
-    slide4_charts = get_chart_shapes(slide4)
-    slide4_tables = [shape for shape in slide4.shapes if getattr(shape, "has_table", False)]
-
-    if len(slide3_charts) < 2:
-        raise ValueError("لم أجد شارتين في Slide 3.")
-    if len(slide4_charts) < 1:
-        raise ValueError("لم أجد شارتًا في Slide 4.")
-    if len(slide4_tables) < 1:
-        raise ValueError("لم أجد جدولًا في Slide 4.")
-
-    slide3_charts.sort(key=lambda s: s.left)
-    slide4_charts.sort(key=lambda s: s.left)
-    slide4_tables.sort(key=lambda s: s.left)
-
-    production_plot = trailing_zeros_to_none(production)
-    achieved_plot = trailing_zeros_to_none(achieved)
-    slag_pct_plot = trailing_zeros_to_none(slag_pct)
-
-    replace_single_series_chart(
-        slide3_charts[0].chart,
-        weeks,
-        "Production Roll",
-        production_plot,
-        percent_chart=False
-    )
-
-    replace_single_series_chart(
-        slide3_charts[1].chart,
-        weeks,
-        "Achieved %",
-        achieved_plot,
-        percent_chart=True,
-        percent_decimals=1
-    )
-
-    replace_two_series_chart(
-        slide4_charts[0].chart,
-        weeks,
-        "Slag %",
-        slag_pct_plot,
-        "Target Slag %",
-        target_slag_pct,
-        percent_chart=True,
-        percent_decimals=2
-    )
-
-    update_table_first_col_values(slide4_tables[0].table, slag_kg)
-
-
-# =========================
-# PASTING
-# Slides 5-8
-# Sheet: Pasting
-# A Week
-# B Produced Blocks
-# C Achieved %
-# D Strip Scrap %
-# E Strip Scrap Target %
-# F Plate Scrap %
-# G Plate Scrap Target %
-# H Rejected Plates %
-# I Rejected Plates Target %
-# =========================
-def read_pasting_data(excel_bytes):
-    wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
-    ws = get_sheet_case_insensitive(wb, "Pasting")
-
-    if ws is None:
-        raise ValueError("لا توجد شيت باسم Pasting في ملف Excel.")
-
-    weeks = []
-    produced_blocks = []
-    achieved_pct = []
-    strip_scrap_pct = []
-    strip_scrap_target = []
-    plate_scrap_pct = []
-    plate_scrap_target = []
-    rejected_plates_pct = []
-    rejected_plates_target = []
-
-    for row in range(2, 7):
-        week = ws.cell(row=row, column=1).value
-        produced = ws.cell(row=row, column=2).value
-        achieved = ws.cell(row=row, column=3).value
-        strip_actual = ws.cell(row=row, column=4).value
-        strip_target = ws.cell(row=row, column=5).value
-        plate_actual = ws.cell(row=row, column=6).value
-        plate_target = ws.cell(row=row, column=7).value
-        rejected_actual = ws.cell(row=row, column=8).value
-        rejected_target = ws.cell(row=row, column=9).value
-
-        weeks.append(str(week) if week else f"Week {row-1}")
-        produced_blocks.append(float(produced) if produced is not None else 0)
-        achieved_pct.append(normalize_percent(achieved))
-        strip_scrap_pct.append(normalize_percent(strip_actual))
-        strip_scrap_target.append(normalize_percent(strip_target) if strip_target is not None else 0.003)
-        plate_scrap_pct.append(normalize_percent(plate_actual))
-        plate_scrap_target.append(normalize_percent(plate_target) if plate_target is not None else 0.003)
-        rejected_plates_pct.append(normalize_percent(rejected_actual))
-        rejected_plates_target.append(normalize_percent(rejected_target) if rejected_target is not None else 0.0003)
-
-    return (
-        weeks,
-        produced_blocks,
-        achieved_pct,
-        strip_scrap_pct,
-        strip_scrap_target,
-        plate_scrap_pct,
-        plate_scrap_target,
-        rejected_plates_pct,
-        rejected_plates_target,
-    )
-
-
-def update_pasting_slides(
-    prs,
-    weeks,
-    produced_blocks,
-    achieved_pct,
-    strip_scrap_pct,
-    strip_scrap_target,
-    plate_scrap_pct,
-    plate_scrap_target,
-    rejected_plates_pct,
-    rejected_plates_target,
-):
-    slide5 = prs.slides[4]
-    slide6 = prs.slides[5]
-    slide7 = prs.slides[6]
-    slide8 = prs.slides[7]
-
-    slide5_charts = get_chart_shapes(slide5)
-    slide6_charts = get_chart_shapes(slide6)
-    slide7_charts = get_chart_shapes(slide7)
-    slide8_charts = get_chart_shapes(slide8)
-
-    if len(slide5_charts) < 2:
-        raise ValueError("لم أجد شارتين في Slide 5.")
-    if len(slide6_charts) < 1:
-        raise ValueError("لم أجد شارتًا في Slide 6.")
-    if len(slide7_charts) < 1:
-        raise ValueError("لم أجد شارتًا في Slide 7.")
-    if len(slide8_charts) < 1:
-        raise ValueError("لم أجد شارتًا في Slide 8.")
-
-    slide5_charts.sort(key=lambda s: s.left)
-    slide6_charts.sort(key=lambda s: s.left)
-    slide7_charts.sort(key=lambda s: s.left)
-    slide8_charts.sort(key=lambda s: s.left)
-
-    produced_blocks_plot = trailing_zeros_to_none(produced_blocks)
-    achieved_pct_plot = trailing_zeros_to_none(achieved_pct)
-    strip_scrap_pct_plot = trailing_zeros_to_none(strip_scrap_pct)
-    plate_scrap_pct_plot = trailing_zeros_to_none(plate_scrap_pct)
-    rejected_plates_pct_plot = trailing_zeros_to_none(rejected_plates_pct)
-
-    replace_single_series_chart(
-        slide5_charts[0].chart,
-        weeks,
-        "Produced Blocks",
-        produced_blocks_plot,
-        percent_chart=False
-    )
-
-    replace_single_series_chart(
-        slide5_charts[1].chart,
-        weeks,
-        "Achieved %",
-        achieved_pct_plot,
-        percent_chart=True,
-        percent_decimals=1
-    )
-
-    replace_two_series_chart(
-        slide6_charts[0].chart,
-        weeks,
-        "Strip Scrap %",
-        strip_scrap_pct_plot,
-        "Target Strip Scrap %",
-        strip_scrap_target,
-        percent_chart=True,
-        percent_decimals=2
-    )
-
-    replace_two_series_chart(
-        slide7_charts[0].chart,
-        weeks,
-        "Plate Scrap %",
-        plate_scrap_pct_plot,
-        "Target Plate Scrap %",
-        plate_scrap_target,
-        percent_chart=True,
-        percent_decimals=2
-    )
-
-    replace_two_series_chart(
-        slide8_charts[0].chart,
-        weeks,
-        "Rejected Plates %",
-        rejected_plates_pct_plot,
-        "Target Rejected Plates %",
-        rejected_plates_target,
-        percent_chart=True,
-        percent_decimals=2
-    )
-
-
-# =========================
 # ASSEMBLY MAIN
 # Slides 9-12
-# Sheet: Assembly_Main
-# A Row Type
-# B Week
-# C Production Battery
-# D Productivity %
 # =========================
 def read_assembly_main_data(excel_bytes):
     wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
@@ -438,6 +146,7 @@ def read_assembly_main_data(excel_bytes):
     if ws is None:
         raise ValueError("لا توجد شيت باسم Assembly_Main.")
 
+    # A=Row Type, B=Week, C=Production Battery, D=Productivity %
     column_map = {
         "week": 2,
         "production": 3,
@@ -455,6 +164,7 @@ def read_assembly_main_data(excel_bytes):
 
 
 def update_assembly_main_slides(prs, main_data):
+    # 9 total, 10 line1, 11 line2, 12 line3
     slide_map = [
         (prs.slides[8],  main_data["total"]),
         (prs.slides[9],  main_data["kory1"]),
@@ -474,6 +184,7 @@ def update_assembly_main_slides(prs, main_data):
         production_plot = trailing_zeros_to_none(data["production"])
         productivity_plot = trailing_zeros_to_none(data["productivity"])
 
+        # Left chart = production
         replace_single_series_chart(
             charts[0].chart,
             weeks,
@@ -482,6 +193,7 @@ def update_assembly_main_slides(prs, main_data):
             percent_chart=False
         )
 
+        # Right chart = productivity %
         replace_single_series_chart(
             charts[1].chart,
             weeks,
@@ -495,19 +207,6 @@ def update_assembly_main_slides(prs, main_data):
 # =========================
 # ASSEMBLY SCRAP
 # Slides 13-22
-# Sheet: Assembly_Scrap
-# A Row Type
-# B Week
-# C Scraped Plate %
-# D Scraped Plate Target %
-# E Reworked Plate %
-# F Reworked Plate Target %
-# G Separator Scrap %
-# H Separator Target %
-# I Box Scrap %
-# J Box Scrap Target %
-# K Cover Scrap %
-# L Cover Scrap Target %
 # =========================
 def read_assembly_scrap_data(excel_bytes):
     wb = load_workbook(io.BytesIO(excel_bytes), data_only=True)
@@ -516,6 +215,7 @@ def read_assembly_scrap_data(excel_bytes):
     if ws is None:
         raise ValueError("لا توجد شيت باسم Assembly_Scrap.")
 
+    # A=Row Type, B=Week, ثم النسب
     column_map = {
         "week": 2,
         "scraped_actual": 3,
@@ -578,6 +278,7 @@ def update_scrap_lines_slide(
 
     charts = sort_three_charts_layout(charts)
 
+    # Top chart = LINE 1
     replace_two_series_chart(
         charts[0].chart, weeks,
         actual_name, trailing_zeros_to_none(k1_actual),
@@ -586,6 +287,7 @@ def update_scrap_lines_slide(
         percent_decimals=decimals
     )
 
+    # Bottom-left = LINE 2
     replace_two_series_chart(
         charts[1].chart, weeks,
         actual_name, trailing_zeros_to_none(k2_actual),
@@ -594,6 +296,7 @@ def update_scrap_lines_slide(
         percent_decimals=decimals
     )
 
+    # Bottom-right = LINE 3
     replace_two_series_chart(
         charts[2].chart, weeks,
         actual_name, trailing_zeros_to_none(k3_actual),
@@ -706,38 +409,28 @@ def update_assembly_scrap_slides(prs, scrap_data):
 # MAIN
 # =========================
 if st.button("Generate PowerPoint"):
-    if st.session_state.excel_bytes is None or st.session_state.ppt_bytes is None:
+    if excel_file is None or ppt_file is None:
         st.error("ارفعي ملف Excel وملف PowerPoint الأول.")
     else:
         try:
-            prs = Presentation(io.BytesIO(st.session_state.ppt_bytes))
+            prs = Presentation(io.BytesIO(ppt_file.getvalue()))
 
-            # Strip
-            strip_values = read_strip_data(st.session_state.excel_bytes)
-            update_strip_slides(prs, *strip_values)
-
-            # Pasting
-            pasting_values = read_pasting_data(st.session_state.excel_bytes)
-            update_pasting_slides(prs, *pasting_values)
-
-            # Assembly Main
-            assembly_main_values = read_assembly_main_data(st.session_state.excel_bytes)
+            assembly_main_values = read_assembly_main_data(excel_file.getvalue())
             update_assembly_main_slides(prs, assembly_main_values)
 
-            # Assembly Scrap
-            assembly_scrap_values = read_assembly_scrap_data(st.session_state.excel_bytes)
+            assembly_scrap_values = read_assembly_scrap_data(excel_file.getvalue())
             update_assembly_scrap_slides(prs, assembly_scrap_values)
 
             output = io.BytesIO()
             prs.save(output)
             output.seek(0)
 
-            st.success("تم تحديث Slides 3-22 الخاصة بـ Strip وPasting وAssembly بنجاح.")
+            st.success("تم تحديث Slides 9-22 الخاصة بـ Assembly فقط.")
 
             st.download_button(
                 label="Download PowerPoint",
                 data=output,
-                file_name="generated_report.pptx",
+                file_name="assembly_only_test.pptx",
                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             )
 
