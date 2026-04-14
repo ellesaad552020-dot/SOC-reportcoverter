@@ -7,8 +7,33 @@ from pptx.chart.data import CategoryChartData
 st.set_page_config(page_title="Weekly Report Generator", layout="centered")
 st.title("Weekly Report Generator")
 
-excel_file = st.file_uploader("ارفعي ملف Excel", type=["xlsx"])
-ppt_file = st.file_uploader("ارفعي الباوربوينت الريفرنس", type=["pptx"])
+# =========================
+# Stable Upload State
+# =========================
+if "excel_bytes" not in st.session_state:
+    st.session_state.excel_bytes = None
+if "excel_name" not in st.session_state:
+    st.session_state.excel_name = None
+if "ppt_bytes" not in st.session_state:
+    st.session_state.ppt_bytes = None
+if "ppt_name" not in st.session_state:
+    st.session_state.ppt_name = None
+
+uploaded_excel = st.file_uploader("ارفعي ملف Excel", type=["xlsx"], key="excel_uploader")
+if uploaded_excel is not None:
+    st.session_state.excel_bytes = uploaded_excel.getvalue()
+    st.session_state.excel_name = uploaded_excel.name
+
+uploaded_ppt = st.file_uploader("ارفعي الباوربوينت الريفرنس", type=["pptx"], key="ppt_uploader")
+if uploaded_ppt is not None:
+    st.session_state.ppt_bytes = uploaded_ppt.getvalue()
+    st.session_state.ppt_name = uploaded_ppt.name
+
+if st.session_state.excel_name:
+    st.success(f"تم حفظ ملف Excel: {st.session_state.excel_name}")
+
+if st.session_state.ppt_name:
+    st.success(f"تم حفظ ملف PowerPoint: {st.session_state.ppt_name}")
 
 
 # =========================
@@ -159,7 +184,7 @@ def read_strip_data(excel_bytes):
     slag_kg = []
     target_slag_pct = []
 
-    for row in range(2, 7):  # Week 1 to Week 5
+    for row in range(2, 7):
         week = ws.cell(row=row, column=1).value
         prod = ws.cell(row=row, column=2).value
         ach = ws.cell(row=row, column=3).value
@@ -270,7 +295,7 @@ def read_pasting_data(excel_bytes):
     rejected_plates_pct = []
     rejected_plates_target = []
 
-    for row in range(2, 7):  # Week 1 to Week 5
+    for row in range(2, 7):
         week = ws.cell(row=row, column=1).value
         produced = ws.cell(row=row, column=2).value
         achieved = ws.cell(row=row, column=3).value
@@ -681,26 +706,26 @@ def update_assembly_scrap_slides(prs, scrap_data):
 # MAIN
 # =========================
 if st.button("Generate PowerPoint"):
-    if excel_file is None or ppt_file is None:
+    if st.session_state.excel_bytes is None or st.session_state.ppt_bytes is None:
         st.error("ارفعي ملف Excel وملف PowerPoint الأول.")
     else:
         try:
-            prs = Presentation(io.BytesIO(ppt_file.getvalue()))
+            prs = Presentation(io.BytesIO(st.session_state.ppt_bytes))
 
             # Strip
-            strip_values = read_strip_data(excel_file.getvalue())
+            strip_values = read_strip_data(st.session_state.excel_bytes)
             update_strip_slides(prs, *strip_values)
 
             # Pasting
-            pasting_values = read_pasting_data(excel_file.getvalue())
+            pasting_values = read_pasting_data(st.session_state.excel_bytes)
             update_pasting_slides(prs, *pasting_values)
 
             # Assembly Main
-            assembly_main_values = read_assembly_main_data(excel_file.getvalue())
+            assembly_main_values = read_assembly_main_data(st.session_state.excel_bytes)
             update_assembly_main_slides(prs, assembly_main_values)
 
             # Assembly Scrap
-            assembly_scrap_values = read_assembly_scrap_data(excel_file.getvalue())
+            assembly_scrap_values = read_assembly_scrap_data(st.session_state.excel_bytes)
             update_assembly_scrap_slides(prs, assembly_scrap_values)
 
             output = io.BytesIO()
